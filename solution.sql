@@ -1,5 +1,3 @@
--- Этап 1. Создание и заполнение БД
-
 /* Создание и наполнение схемы raw_data. */
 
 
@@ -79,6 +77,19 @@ CREATE TABLE car_shop.cars (
 	gasoline_consumption NUMERIC(3, 1) 			-- потребление бензина может содержать только десятые и не может быть больше трехзначной суммы. У numeric повышенная точность при работе с дробными числами. 
 );
 
+ALTER TABLE car_shop.cars                               -- добавила уникальность по трем атрибутам
+ADD CONSTRAINT unique_model_brand_consumption
+UNIQUE (model, brand_id, gasoline_consumption);
+
+/* CREATE TABLE car_shop.cars (
+    id SERIAL PRIMARY KEY,
+    brand_id INTEGER REFERENCES car_shop.brands,
+    model TEXT NOT NULL,
+    gasoline_consumption NUMERIC(3, 1),
+    CONSTRAINT unique_model_brand_consumption
+        UNIQUE (model, brand_id, gasoline_consumption)
+); */
+
 
 INSERT INTO car_shop.cars (brand_id, model, gasoline_consumption)
 SELECT DISTINCT 
@@ -88,20 +99,6 @@ SELECT DISTINCT
 FROM raw_data.sales s
 LEFT JOIN car_shop.brands b ON b.brand_name = trim(split_part(split_part(s.auto, ',', 1), ' ', 1));
 
-
-CREATE TABLE car_shop.car_color (
-	car_id INTEGER REFERENCES car_shop.cars,				-- внешний ключ, поэтому INTEGER
-	color_id INTEGER REFERENCES car_shop.colors				-- внешний ключ, поэтому INTEGER
-);
-
-
-INSERT INTO car_shop.car_color (car_id, color_id)
-SELECT DISTINCT 
-	cr.id AS car_id, 
-	cl.id AS color_id
-FROM raw_data.sales s
-JOIN car_shop.cars cr ON cr.model = trim(substr(split_part(s.auto, ',', 1), strpos(split_part(s.auto, ',', 1), ' ')))
-JOIN car_shop.colors cl ON cl.color = trim(split_part(s.auto, ',', 2));
 
 
 CREATE TABLE car_shop.clients (
@@ -133,24 +130,35 @@ CREATE TABLE car_shop.purchases (
 	client_id INTEGER REFERENCES car_shop.clients			-- внешний ключ, поэтому INTEGER
 );
 
+ALTER TABLE car_shop.purchases                             -- вариант с добавлением color_id кажется лучше, более оптимизированы и проще запросы 
+ADD COLUMN color_id INTEGER REFERENCES car_shop.colors;
 
-INSERT INTO car_shop.purchases (car_id, price, date, discount, client_id)
+
+/* CREATE TABLE car_shop.purchases (
+    sale_id SERIAL PRIMARY KEY,
+    car_id INTEGER REFERENCES car_shop.cars,
+    color_id INTEGER REFERENCES car_shop.colors,
+    price NUMERIC(9, 2) NOT NULL,
+    date DATE NOT NULL,
+    discount INTEGER DEFAULT 0,
+    client_id INTEGER REFERENCES car_shop.clients
+); */
+
+TRUNCATE TABLE car_shop.purchases RESTART IDENTITY CASCADE;
+
+INSERT INTO car_shop.purchases (car_id, color_id, price, date, discount, client_id)
 SELECT DISTINCT 
 	cr.id AS car_id, 
+	col.id AS color_id,
 	round(s.price, 2) AS price, 
 	s.date, 
 	s.discount, 
 	cl.id AS client_id
 FROM raw_data.sales s
 JOIN car_shop.cars cr ON cr.model = trim(substr(split_part(s.auto, ',', 1), strpos(split_part(s.auto, ',', 1), ' ')))
-JOIN car_shop.clients cl ON cl.phone_num = s.phone;
+JOIN car_shop.clients cl ON cl.phone_num = s.phone
+JOIN car_shop.colors col ON col.color = trim(split_part(s.auto, ',', 2));
 
-
-
-
-
-
--- Этап 2. Создание выборок
 
 /* Задание 1 из 6
 
@@ -159,7 +167,7 @@ JOIN car_shop.clients cl ON cl.phone_num = s.phone;
 
 
 SELECT 
-	100 - (count(gasoline_consumption) * 100 / count(model)) AS nulls_percentage_gasoline_consumption
+	100 - (count(gasoline_consumption) * 100 / count(model)::real) AS nulls_percentage_gasoline_consumption
 FROM car_shop.cars;
 
 
@@ -228,8 +236,8 @@ ORDER BY person;
 
 SELECT 
 	c.country_name AS brand_origin,
-	MAX(p.price * (1 + p.discount)) AS price_max,
-	MIN(p.price * (1 + p.discount)) AS price_min
+	MAX(p.price / (1 - p.discount / 100)) AS price_max,
+	MIN(p.price / (1 - p.discount / 100)) AS price_min
 FROM car_shop.countries c 
 JOIN car_shop.brands b ON b.brand_origin_id = c.id
 JOIN car_shop.cars cr ON cr.brand_id = b.id
@@ -246,7 +254,4 @@ GROUP BY c.country_name;
 SELECT COUNT(id) AS persons_from_usa_count
 FROM car_shop.clients
 WHERE phone_num LIKE '+1%';
-
-
-
 
